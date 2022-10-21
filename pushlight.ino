@@ -84,8 +84,8 @@ struct t_gesture {
     int servo_target_pos = 0;
 
     const int SERVO_TOLERANCE = 2;
-    const int THRESHOLD_CLICK_MIN = 200;
-    const int THRESHOLD_CLICK_MAX = 1500;
+    const int THRESHOLD_CLICK_MIN = 50;
+    const int THRESHOLD_CLICK_MAX = 1200;
     const int THRESHOLD_MOVE_MAX = 5000;
 } gesture = {};
 
@@ -95,18 +95,6 @@ struct t_gesture {
 // to even out jumps;
 // global value for button state
 bool button_state = false;
-
-// bool gesture_turn_servo = false;
-// bool last_btn_state = false;
-// unsigned long last_btn_up;
-// unsigned long last_btn_down;
-// int click_counts = 0;
-// int servo_target_pos = 0;
-// const int servo_tolerance = 5;
-
-// const int THRESHOLD_CLICK_MIN = 100;
-// const int THRESHOLD_CLICK_MAX = 1000;
-// const int THRESHOLD_MOVE_MAX = 10000;
 
 // Job mgmt data
 
