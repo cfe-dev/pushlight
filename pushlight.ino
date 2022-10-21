@@ -14,10 +14,8 @@
 
 // Pin D7
 #define GPIO_BTN 13
-
 // Pin D0
 #define GPIO_SERVO 16
-
 // Pin D2
 #define GPIO_GPSRX 4
 // Pin D1
@@ -26,19 +24,12 @@
 #define GPIO_COUNT 17
 //#define GPIO_COUNT 16
 
-// array indices for jobs
-#define JOB_LED 0
-#define JOB_MOTOR 1
-#define JOB_TRACKPINS 2
-#define JOB_GPS 3
-#define JOB_GESTURES 4
-
 unsigned long cur_run_ms = 0;
 
 // ******************
 // Job 1, LED setting vars
 int brightness = 0; // how bright the LED is (0 = full, 512 = dim, 1023 = off)
-int fadeAmount = 8; // how many points to fade the LED by
+int fadeAmount = 4; // how many points to fade the LED by
 
 // const int brightness_max = 1023;
 const int brightness_max = 384;
@@ -67,8 +58,6 @@ struct t_pinvals {
 // Job 4, GPS
 SoftwareSerial gpsSerial(GPIO_GPSRX, GPIO_GPSTX);
 TinyGPS gps;
-
-// float lat = 28.5458, lon = 77.1703;
 float lat = 0, lon = 0;
 
 // ******************
@@ -78,33 +67,68 @@ enum State { IDLE,
              MOVING,
              MOVING_TO_POSITION,
              AWAIT_GESTURE };
+
 const char *StateName[4] = {
     "Idle",
     "Moving",
-    "Moving to Target",
+    "Moving to Position",
     "Awaiting Gesture"};
-bool gesture_turn_servo = false;
-bool last_btn_state = false;
-unsigned long last_btn_up;
-unsigned long last_btn_down;
-int click_counts = 0;
-int servo_target_pos = 0;
-const int servo_tolerance = 5;
 
-const int THRESHOLD_CLICK_MIN = 100;
-const int THRESHOLD_CLICK_MAX = 1000;
-const int THRESHOLD_MOVE_MAX = 10000;
+struct t_gesture {
+    int last_state = 0;
+    bool turn_servo = false;
+    bool last_btn_state = false;
+    unsigned long last_btn_up;
+    unsigned long last_btn_down;
+    int click_counts = 0;
+    int servo_target_pos = 0;
+
+    const int SERVO_TOLERANCE = 2;
+    const int THRESHOLD_CLICK_MIN = 200;
+    const int THRESHOLD_CLICK_MAX = 1500;
+    const int THRESHOLD_MOVE_MAX = 5000;
+} gesture = {};
+
+// ******************
+// Job 6, Read Button
+// reads button in a fixed, slower interval
+// to even out jumps;
+// global value for button state
+bool button_state = false;
+
+// bool gesture_turn_servo = false;
+// bool last_btn_state = false;
+// unsigned long last_btn_up;
+// unsigned long last_btn_down;
+// int click_counts = 0;
+// int servo_target_pos = 0;
+// const int servo_tolerance = 5;
+
+// const int THRESHOLD_CLICK_MIN = 100;
+// const int THRESHOLD_CLICK_MAX = 1000;
+// const int THRESHOLD_MOVE_MAX = 10000;
 
 // Job mgmt data
+
+enum Jobs {
+    JOB_LED,
+    JOB_MOTOR,
+    JOB_TRACKPINS,
+    JOB_GPS,
+    JOB_GESTURES,
+    JOB_READBTN
+};
+
 struct t_job {
     unsigned long last_run_ms;
     const long interval;
-} jobs[5] = {
-    {0, 50},  // index JOB_LED, 50ms interval
-    {0, 50},  // index JOB_MOTOR, 50ms interval
-    {0, 10},  // index JOB_TRACKPINS, 10ms interval
-    {0, 500}, // index JOB_GPS, 0.5s interval
-    {0, 20}   // index JOB_GESTURES, 10ms interval
+} jobs[6] = {
+    {0, 40},  // JOB_LED
+    {0, 20},  // JOB_MOTOR
+    {0, 10},  // JOB_TRACKPINS
+    {0, 500}, // JOB_GPS
+    {0, 20},  // JOB_GESTURES
+    {0, 200}  // JOB_READBTN
 };
 
 void setup() {
@@ -122,7 +146,7 @@ void setup() {
     // initialize pinvals
     for (int i = 1; i < GPIO_COUNT; i++) {
         pinvals[i].pin = i;
-        pinvals[i].val = -1;
+        pinvals[i].val = -1; // skip all by default
     }
 
     pinvals[GPIO_BTN].val = 0;
@@ -131,7 +155,7 @@ void setup() {
 
     // JOB_MOTOR
     servo.attach(GPIO_SERVO);
-    servo.write(servo_target_pos);
+    servo.write(gesture.servo_target_pos);
 
     // JOB_GESTURES
     setup_gesture_FSM();
@@ -153,9 +177,10 @@ void loop() {
     cur_run_ms = millis();
     if (check_job_interval(jobs[JOB_LED])) fade_led();
     if (check_job_interval(jobs[JOB_MOTOR])) turn_servo();
-    if (check_job_interval(jobs[JOB_TRACKPINS])) track_pins();
+    // if (check_job_interval(jobs[JOB_TRACKPINS])) track_pins();
     if (check_job_interval(jobs[JOB_GPS])) read_gps();
-    if (check_job_interval(jobs[JOB_GESTURES])) gesture_FSM.Update();
+    if (check_job_interval(jobs[JOB_GESTURES])) process_gestures();
+    if (check_job_interval(jobs[JOB_READBTN])) read_btn();
 }
 
 bool check_job_interval(t_job &job) {
@@ -184,7 +209,7 @@ void track_pins() {
 void fade_led() {
     // // original; fade based on button pressed time along a curve
     //
-    // int pinval = digitalRead(GPIO_BTN);
+    // int pinval = button_state; //digitalRead(GPIO_BTN);
     // if (pinval == HIGH)
     //     brightness += fadeAmount;
     // else
@@ -205,9 +230,9 @@ void fade_led() {
 
 void turn_servo() {
     // switch to gesture control instead of raw GPIO_BTN
-    if (gesture_turn_servo) {
+    if (gesture.turn_servo) {
 
-        // int pinval = digitalRead(GPIO_BTN);
+        // int pinval = button_state;
         // if (pinval == LOW) {
         // servo_angle = servo_angle + servo_steps;
         // if (servo_angle > 180) servo_angle = 0;
@@ -251,8 +276,6 @@ void read_gps() {
     //     Serial.print("Longitude:");
     //     Serial.println(lon, 6);
     // }
-
-    Serial.println(gesture_FSM.ActiveStateName());
 }
 
 void setup_gesture_FSM() {
@@ -271,27 +294,27 @@ void setup_gesture_FSM() {
 }
 
 bool gesture_first_press() {
-    if (digitalRead(GPIO_BTN) == LOW) {
-        last_btn_down = cur_run_ms;
-        last_btn_state = true;
-        click_counts = 0;
+    if (button_state == LOW) {
+        gesture.last_btn_down = cur_run_ms;
+        gesture.last_btn_state = true;
+        gesture.click_counts = 0;
         return true;
     }
     return false;
 }
 
 bool gesture_release() {
-    if (digitalRead(GPIO_BTN) != LOW) {
-        last_btn_up = cur_run_ms;
-        last_btn_state = false;
+    if (button_state != LOW) {
+        gesture.last_btn_up = cur_run_ms;
+        gesture.last_btn_state = false;
         return true;
     }
     return false;
 }
 
 bool gesture_hold() {
-    if (digitalRead(GPIO_BTN) == LOW && last_btn_state == true && ((cur_run_ms - last_btn_down) > THRESHOLD_CLICK_MAX)) {
-        if (click_counts > 0)
+    if (button_state == LOW && gesture.last_btn_state == true && ((cur_run_ms - gesture.last_btn_down) > gesture.THRESHOLD_CLICK_MAX)) {
+        if (gesture.click_counts > 0)
             direction_up = !direction_up;
         return true;
     }
@@ -301,54 +324,76 @@ bool gesture_hold() {
 void gesture_check() {
     // on button up, add click if minimum threshold is reached
     // and the last click was not longer back than the max click threshold
-    if (digitalRead(GPIO_BTN) != LOW && last_btn_state == true && ((cur_run_ms - last_btn_down) > THRESHOLD_CLICK_MIN) && ((cur_run_ms - last_btn_up) < THRESHOLD_CLICK_MAX)) {
-        last_btn_up = cur_run_ms;
-        last_btn_state = false;
-        click_counts += 1;
+    if (button_state != LOW && gesture.last_btn_state == true && ((cur_run_ms - gesture.last_btn_down) > gesture.THRESHOLD_CLICK_MIN) && ((cur_run_ms - gesture.last_btn_up) < gesture.THRESHOLD_CLICK_MAX)) {
+        gesture.last_btn_up = cur_run_ms;
+        gesture.last_btn_state = false;
+        gesture.click_counts += 1;
     }
-    if (digitalRead(GPIO_BTN) == LOW && last_btn_state == false) {
-        last_btn_down = cur_run_ms;
-        last_btn_state = true;
+    if (button_state == LOW && gesture.last_btn_state == false) {
+        gesture.last_btn_down = cur_run_ms;
+        gesture.last_btn_state = true;
     }
 }
 
 bool gesture_in_position() {
-    if ((servo_angle + servo_tolerance) > servo_target_pos && (servo_angle - servo_tolerance) < servo_target_pos)
+    if ((servo_angle + gesture.SERVO_TOLERANCE) > gesture.servo_target_pos && (servo_angle - gesture.SERVO_TOLERANCE) < gesture.servo_target_pos)
         return true;
     else
         return false;
 }
 
 void gesture_enter_move() {
-    gesture_turn_servo = true;
+    gesture.turn_servo = true;
 }
 
 void gesture_leave_move() {
-    gesture_turn_servo = false;
+    gesture.turn_servo = false;
 }
 
 bool gesture_select() {
-    if (digitalRead(GPIO_BTN) != LOW && last_btn_state == false && (last_btn_up > last_btn_down) && ((cur_run_ms - last_btn_down) > THRESHOLD_CLICK_MAX)) {
-        switch (click_counts) {
+    if ((button_state != LOW && gesture.last_btn_state == false) && (gesture.last_btn_up > gesture.last_btn_down) && ((cur_run_ms - gesture.last_btn_down) > gesture.THRESHOLD_CLICK_MAX)) {
+        switch (gesture.click_counts) {
         case 1:
-            servo_target_pos = 20;
+            gesture.servo_target_pos = 20;
+            Serial.println(F("Pos 1"));
             break;
 
         case 2:
-            servo_target_pos = 140;
+            gesture.servo_target_pos = 140;
+            Serial.println(F("Pos 2"));
             break;
 
         default:
             break;
         }
+        if (gesture.servo_target_pos > servo_angle)
+            direction_up = true;
+        if (gesture.servo_target_pos < servo_angle)
+            direction_up = false;
         return true;
     }
     return false;
 }
 
 bool gesture_cancel() {
-    if ((cur_run_ms - last_btn_down) > THRESHOLD_MOVE_MAX || (cur_run_ms - last_btn_up) > THRESHOLD_MOVE_MAX) {
+    if ((cur_run_ms - gesture.last_btn_down) > gesture.THRESHOLD_MOVE_MAX && (cur_run_ms - gesture.last_btn_up) > gesture.THRESHOLD_MOVE_MAX && (gesture.last_btn_up > gesture.last_btn_down)) {
         return true;
     }
     return false;
+}
+
+void process_gestures() {
+    if (gesture_FSM.Update()) {
+        int new_state = gesture_FSM.GetState();
+        if (new_state != gesture.last_state)
+            Serial.println(gesture_FSM.ActiveStateName());
+        gesture.last_state = new_state;
+    }
+}
+
+void read_btn() {
+    bool old_state = button_state;
+    button_state = (digitalRead(GPIO_BTN) == LOW) ? false : true;
+    if (old_state != button_state)
+        Serial.println(button_state);
 }
