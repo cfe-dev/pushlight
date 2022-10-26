@@ -28,6 +28,8 @@ unsigned long cur_run_ms = 0;
 
 // ******************
 // Job 1, LED setting vars
+const int JOB_INTV_LED = 40;
+
 int brightness = 0; // how bright the LED is (0 = full, 512 = dim, 1023 = off)
 int fadeAmount = 4; // how many points to fade the LED by
 
@@ -39,16 +41,20 @@ const int fadeAmount_min = 4;
 
 // ******************
 // Job 2, Servo vars
+const int JOB_INTV_MOTOR = 400;
+
 Servo servo;
 
-int servo_steps = 1;
+int servo_steps = 4;
 int servo_angle = 0;
-const int servo_angle_max = 180;
-const int servo_angle_min = 0;
+const int servo_angle_max = 90;
+const int servo_angle_min = 10;
 bool direction_up = true;
 
 // ******************
 // Job 3, Pin Value tracking
+const int JOB_INTV_TRACKPINS = 10;
+
 struct t_pinvals {
     int pin;
     int val;
@@ -56,12 +62,14 @@ struct t_pinvals {
 
 // ******************
 // Job 4, GPS
+const int JOB_INTV_GPS = 500;
 SoftwareSerial gpsSerial(GPIO_GPSRX, GPIO_GPSTX);
 TinyGPS gps;
 float lat = 0, lon = 0;
 
 // ******************
 // Job 5, Gestures
+const int JOB_INTV_GESTURES = 20;
 YA_FSM gesture_FSM;
 enum State { IDLE,
              MOVING,
@@ -83,7 +91,7 @@ struct t_gesture {
     int click_counts = 0;
     int servo_target_pos = 0;
 
-    const int SERVO_TOLERANCE = 2;
+    const int SERVO_TOLERANCE = 4;
     const int THRESHOLD_CLICK_MIN = 50;
     const int THRESHOLD_CLICK_MAX = 1200;
     const int THRESHOLD_MOVE_MAX = 5000;
@@ -94,6 +102,7 @@ struct t_gesture {
 // reads button in a fixed, slower interval
 // to even out jumps;
 // global value for button state
+const int JOB_INTV_READBTN = 200;
 bool button_state = false;
 
 // Job mgmt data
@@ -111,12 +120,12 @@ struct t_job {
     unsigned long last_run_ms;
     const long interval;
 } jobs[6] = {
-    {0, 40},  // JOB_LED
-    {0, 20},  // JOB_MOTOR
-    {0, 10},  // JOB_TRACKPINS
-    {0, 500}, // JOB_GPS
-    {0, 20},  // JOB_GESTURES
-    {0, 200}  // JOB_READBTN
+    {0, JOB_INTV_LED},       // ix JOB_LED
+    {0, JOB_INTV_MOTOR},     // ix JOB_MOTOR
+    {0, JOB_INTV_TRACKPINS}, // ix JOB_TRACKPINS
+    {0, JOB_INTV_GPS},       // ix JOB_GPS
+    {0, JOB_INTV_GESTURES},  // ix JOB_GESTURES
+    {0, JOB_INTV_READBTN}    // ix JOB_READBTN
 };
 
 void setup() {
@@ -137,6 +146,7 @@ void setup() {
         pinvals[i].val = -1; // skip all by default
     }
 
+    // enable relevant pins
     pinvals[GPIO_BTN].val = 0;
     pinvals[GPIO_GPSRX].val = 0;
     pinvals[GPIO_GPSTX].val = 0;
@@ -225,11 +235,13 @@ void turn_servo() {
         // servo_angle = servo_angle + servo_steps;
         // if (servo_angle > 180) servo_angle = 0;
 
-        if (servo_angle > 180) servo_angle = 180;
-        if (servo_angle < 0) servo_angle = 0;
+        int servo_angle_prv = servo_angle;
 
-        if (servo_angle == 180) direction_up = false;
-        if (servo_angle == 0) direction_up = true;
+        if (servo_angle > servo_angle_max) servo_angle = servo_angle_max;
+        if (servo_angle < servo_angle_min) servo_angle = servo_angle_min;
+
+        if (servo_angle == servo_angle_max) direction_up = false;
+        if (servo_angle == servo_angle_min) direction_up = true;
 
         if (direction_up) {
             servo_angle = servo_angle + servo_steps;
@@ -237,8 +249,11 @@ void turn_servo() {
             servo_angle = servo_angle - servo_steps;
         }
 
-        servo.write(servo_angle);
-        // Serial.println(servo_angle);
+        // smoothe out servo movement; unnessecary writes cause janks
+        if (servo_angle_prv != servo_angle) {
+            servo.write(servo_angle);
+            // Serial.println(servo_angle);
+        }
     }
 }
 
@@ -301,8 +316,10 @@ bool gesture_release() {
 }
 
 bool gesture_hold() {
-    if (button_state == LOW && gesture.last_btn_state == true && ((cur_run_ms - gesture.last_btn_down) > gesture.THRESHOLD_CLICK_MAX)) {
-        if (gesture.click_counts > 0)
+    if (button_state == LOW && gesture.last_btn_state == true                    // button is already pressed
+        && ((cur_run_ms - gesture.last_btn_down) > gesture.THRESHOLD_CLICK_MAX)) // and more than time CLICK_MAX time has passed since last button down
+    {
+        if (gesture.click_counts > 0) // switch direction if a click has been entered
             direction_up = !direction_up;
         return true;
     }
@@ -312,19 +329,23 @@ bool gesture_hold() {
 void gesture_check() {
     // on button up, add click if minimum threshold is reached
     // and the last click was not longer back than the max click threshold
-    if (button_state != LOW && gesture.last_btn_state == true && ((cur_run_ms - gesture.last_btn_down) > gesture.THRESHOLD_CLICK_MIN) && ((cur_run_ms - gesture.last_btn_up) < gesture.THRESHOLD_CLICK_MAX)) {
+    if (button_state != LOW && gesture.last_btn_state == true                   // button is being released
+        && ((cur_run_ms - gesture.last_btn_down) > gesture.THRESHOLD_CLICK_MIN) // and at least CLICK_MIN has occured since last button down
+        && ((cur_run_ms - gesture.last_btn_up) < gesture.THRESHOLD_CLICK_MAX))  // and less than CLICK_MAX has occured since last button up
+    {
         gesture.last_btn_up = cur_run_ms;
         gesture.last_btn_state = false;
         gesture.click_counts += 1;
     }
-    if (button_state == LOW && gesture.last_btn_state == false) {
+    if (button_state == LOW && gesture.last_btn_state == false) { // button is being pressed
         gesture.last_btn_down = cur_run_ms;
         gesture.last_btn_state = true;
     }
 }
 
 bool gesture_in_position() {
-    if ((servo_angle + gesture.SERVO_TOLERANCE) > gesture.servo_target_pos && (servo_angle - gesture.SERVO_TOLERANCE) < gesture.servo_target_pos)
+    if ((servo_angle + gesture.SERVO_TOLERANCE) > gesture.servo_target_pos     // upper range of tolerance window is greater than target
+        && (servo_angle - gesture.SERVO_TOLERANCE) < gesture.servo_target_pos) // AND lower range of tolerance window is less than target
         return true;
     else
         return false;
@@ -339,7 +360,10 @@ void gesture_leave_move() {
 }
 
 bool gesture_select() {
-    if ((button_state != LOW && gesture.last_btn_state == false) && (gesture.last_btn_up > gesture.last_btn_down) && ((cur_run_ms - gesture.last_btn_down) > gesture.THRESHOLD_CLICK_MAX)) {
+    if ((button_state != LOW && gesture.last_btn_state == false)                 // button is already released
+        && (gesture.last_btn_up > gesture.last_btn_down)                         // and button has actually been pressed before
+        && ((cur_run_ms - gesture.last_btn_down) > gesture.THRESHOLD_CLICK_MAX)) // and at least CLICK_MAX time has passed since button down
+    {
         switch (gesture.click_counts) {
         case 1:
             gesture.servo_target_pos = 20;
@@ -347,7 +371,7 @@ bool gesture_select() {
             break;
 
         case 2:
-            gesture.servo_target_pos = 140;
+            gesture.servo_target_pos = 70;
             Serial.println(F("Pos 2"));
             break;
 
@@ -364,7 +388,9 @@ bool gesture_select() {
 }
 
 bool gesture_cancel() {
-    if ((cur_run_ms - gesture.last_btn_down) > gesture.THRESHOLD_MOVE_MAX && (cur_run_ms - gesture.last_btn_up) > gesture.THRESHOLD_MOVE_MAX && (gesture.last_btn_up > gesture.last_btn_down)) {
+    if ((cur_run_ms - gesture.last_btn_down) > gesture.THRESHOLD_MOVE_MAX  // at least MOVE_MAX time has passed since last button down
+        && (cur_run_ms - gesture.last_btn_up) > gesture.THRESHOLD_MOVE_MAX // at least MOVE_MAX time has passed since last button up
+        && (gesture.last_btn_up > gesture.last_btn_down)) {                // button has actually been pressed once
         return true;
     }
     return false;
