@@ -90,8 +90,8 @@ struct t_gesture {
     unsigned long last_btn_down;
     int click_counts = 0;
     int servo_target_pos = 0;
-    int diff_down = cur_run_ms = 0;
-    int diff_up = cur_run_ms = 0;
+    int diff_down = 0;
+    int diff_up = 0;
 
     const int SERVO_TOLERANCE = 4;
     const int THRESHOLD_CLICK_MIN = 5;
@@ -229,7 +229,8 @@ void fade_led() {
     constrain(brightness, brightness_min, brightness_max);
 
     analogWrite(LED_BUILTIN, brightness);
-    // Serial.println(fadeAmount);
+    if (print_debug)
+        Serial.println(fadeAmount);
 }
 
 void turn_servo() {
@@ -258,7 +259,8 @@ void turn_servo() {
         // smoothe out servo movement; unnessecary writes cause janks
         if (servo_angle_prv != servo_angle) {
             servo.write(servo_angle);
-            // Serial.println(servo_angle);
+            if (print_debug)
+                Serial.println(servo_angle);
         }
     }
 }
