@@ -41,11 +41,11 @@ const int fadeAmount_min = 4;
 
 // ******************
 // Job 2, Servo vars
-const int JOB_INTV_MOTOR = 400;
+const int JOB_INTV_MOTOR = 200;
 
 Servo servo;
 
-int servo_steps = 4;
+int servo_steps = 2;
 int servo_angle = 0;
 const int servo_angle_max = 90;
 const int servo_angle_min = 10;
@@ -90,10 +90,12 @@ struct t_gesture {
     unsigned long last_btn_down;
     int click_counts = 0;
     int servo_target_pos = 0;
+    int diff_down = cur_run_ms = 0;
+    int diff_up = cur_run_ms = 0;
 
     const int SERVO_TOLERANCE = 4;
-    const int THRESHOLD_CLICK_MIN = 50;
-    const int THRESHOLD_CLICK_MAX = 1200;
+    const int THRESHOLD_CLICK_MIN = 5;
+    const int THRESHOLD_CLICK_MAX = 1500;
     const int THRESHOLD_MOVE_MAX = 5000;
 } gesture = {};
 
@@ -128,9 +130,13 @@ struct t_job {
     {0, JOB_INTV_READBTN}    // ix JOB_READBTN
 };
 
+// change this to enable debug output via Serial Monitor
+bool print_debug = false;
+
 void setup() {
     Serial.begin(115200);
-    Serial.println(F("Pushlight Start!"));
+    if (print_debug)
+        Serial.println(F("Pushlight Start!"));
 
     gpsSerial.begin(9600);
 
@@ -282,7 +288,7 @@ void read_gps() {
 }
 
 void setup_gesture_FSM() {
-    gesture_FSM.AddState(StateName[IDLE], nullptr, nullptr, nullptr);
+    gesture_FSM.AddState(StateName[IDLE], gesture_enter_idle, nullptr, nullptr);
     gesture_FSM.AddState(StateName[MOVING], gesture_enter_move, nullptr, gesture_leave_move);
     gesture_FSM.AddState(StateName[MOVING_TO_POSITION], gesture_enter_move, nullptr, gesture_leave_move);
     gesture_FSM.AddState(StateName[AWAIT_GESTURE], nullptr, gesture_check, nullptr);
@@ -301,6 +307,8 @@ bool gesture_first_press() {
         gesture.last_btn_down = cur_run_ms;
         gesture.last_btn_state = true;
         gesture.click_counts = 0;
+        if (print_debug)
+            Serial.println(F("Gesture First Press"));
         return true;
     }
     return false;
@@ -310,17 +318,32 @@ bool gesture_release() {
     if (button_state != LOW) {
         gesture.last_btn_up = cur_run_ms;
         gesture.last_btn_state = false;
+        gesture.diff_down = 0;
+        gesture.diff_up = 0;
+        gesture.last_btn_down = 0;
+        if (print_debug)
+            Serial.println(F("Gesture Release"));
         return true;
     }
     return false;
 }
 
 bool gesture_hold() {
-    if (button_state == LOW && gesture.last_btn_state == true                    // button is already pressed
-        && ((cur_run_ms - gesture.last_btn_down) > gesture.THRESHOLD_CLICK_MAX)) // and more than time CLICK_MAX time has passed since last button down
+    // int diff_down = cur_run_ms - gesture.last_btn_down;
+    // Serial.print(F("Diff down:"));
+    // Serial.println(diff_down);
+    if (button_state == LOW && gesture.last_btn_state == true // button is already pressed
+        && (gesture.last_btn_down > gesture.last_btn_up)      // and button hasn't been released
+        && (gesture.diff_down > gesture.THRESHOLD_CLICK_MAX)) // and more than time CLICK_MAX time has passed since last button down
     {
-        if (gesture.click_counts > 0) // switch direction if a click has been entered
+        if (gesture.click_counts > 0) { // switch direction if a click has been entered
             direction_up = !direction_up;
+            if (print_debug)
+                Serial.println(F("Gesture Reverse Hold"));
+        } else {
+            if (print_debug)
+                Serial.println(F("Gesture Hold"));
+        }
         return true;
     }
     return false;
@@ -329,17 +352,38 @@ bool gesture_hold() {
 void gesture_check() {
     // on button up, add click if minimum threshold is reached
     // and the last click was not longer back than the max click threshold
-    if (button_state != LOW && gesture.last_btn_state == true                   // button is being released
-        && ((cur_run_ms - gesture.last_btn_down) > gesture.THRESHOLD_CLICK_MIN) // and at least CLICK_MIN has occured since last button down
-        && ((cur_run_ms - gesture.last_btn_up) < gesture.THRESHOLD_CLICK_MAX))  // and less than CLICK_MAX has occured since last button up
+    // int diff_down = cur_run_ms - gesture.last_btn_down;
+    // int diff_up = cur_run_ms - gesture.last_btn_up;
+    if (print_debug) {
+        Serial.print(F("Diff down:"));
+        Serial.print(gesture.diff_down);
+        Serial.print(F("; Diff Up:"));
+        Serial.println(gesture.diff_up);
+    }
+    if (button_state != LOW && gesture.last_btn_state == true // button is being released
+                                                              // && (gesture.last_btn_down > gesture.last_btn_up)      // and button down has occurred already
+        && (gesture.diff_down > gesture.THRESHOLD_CLICK_MIN)  // and at least CLICK_MIN has occured since last button down
+        && (gesture.diff_up < gesture.THRESHOLD_CLICK_MAX))   // and less than CLICK_MAX has occured since last button up
     {
         gesture.last_btn_up = cur_run_ms;
         gesture.last_btn_state = false;
         gesture.click_counts += 1;
+        if (print_debug) {
+            Serial.print(F("Last Btn Up: "));
+            Serial.print(gesture.last_btn_up);
+            Serial.print(F("; Click Count: "));
+            Serial.println(gesture.click_counts);
+        }
     }
     if (button_state == LOW && gesture.last_btn_state == false) { // button is being pressed
         gesture.last_btn_down = cur_run_ms;
         gesture.last_btn_state = true;
+        if (print_debug) {
+            Serial.print(F("Last Btn Down: "));
+            Serial.println(gesture.last_btn_down);
+            Serial.print(F("; Click Count: "));
+            Serial.println(gesture.click_counts);
+        }
     }
 }
 
@@ -355,27 +399,40 @@ void gesture_enter_move() {
     gesture.turn_servo = true;
 }
 
+void gesture_enter_idle() {
+    gesture.diff_down = 0;
+    gesture.diff_up = 0;
+    gesture.last_btn_down = 0;
+    gesture.last_btn_up = 0;
+    gesture.click_counts = 0;
+    gesture.last_btn_state = false;
+}
+
 void gesture_leave_move() {
     gesture.turn_servo = false;
 }
 
 bool gesture_select() {
-    if ((button_state != LOW && gesture.last_btn_state == false)                 // button is already released
-        && (gesture.last_btn_up > gesture.last_btn_down)                         // and button has actually been pressed before
-        && ((cur_run_ms - gesture.last_btn_down) > gesture.THRESHOLD_CLICK_MAX)) // and at least CLICK_MAX time has passed since button down
+    if ((button_state != LOW && gesture.last_btn_state == false) // button is already released
+        && (gesture.last_btn_up > gesture.last_btn_down)         // and button has actually been pressed before
+        && (gesture.diff_down > gesture.THRESHOLD_CLICK_MAX))    // and at least CLICK_MAX time has passed since button down
     {
         switch (gesture.click_counts) {
         case 1:
             gesture.servo_target_pos = 20;
-            Serial.println(F("Pos 1"));
+            if (print_debug)
+                Serial.println(F("Pos 1"));
             break;
 
         case 2:
             gesture.servo_target_pos = 70;
-            Serial.println(F("Pos 2"));
+            if (print_debug)
+                Serial.println(F("Pos 2"));
             break;
 
         default:
+            if (print_debug)
+                Serial.println(F("Pos Def"));
             break;
         }
         if (gesture.servo_target_pos > servo_angle)
@@ -388,26 +445,47 @@ bool gesture_select() {
 }
 
 bool gesture_cancel() {
-    if ((cur_run_ms - gesture.last_btn_down) > gesture.THRESHOLD_MOVE_MAX  // at least MOVE_MAX time has passed since last button down
-        && (cur_run_ms - gesture.last_btn_up) > gesture.THRESHOLD_MOVE_MAX // at least MOVE_MAX time has passed since last button up
-        && (gesture.last_btn_up > gesture.last_btn_down)) {                // button has actually been pressed once
+    // int diff_down = cur_run_ms - gesture.last_btn_down;
+    // int diff_up = cur_run_ms - gesture.last_btn_up;
+    // if (gesture.diff_down > gesture.THRESHOLD_MOVE_MAX      // at least MOVE_MAX time has passed since last button down
+    //     && gesture.diff_up > gesture.THRESHOLD_MOVE_MAX     // at least MOVE_MAX time has passed since last button up
+    //     && (gesture.last_btn_up > gesture.last_btn_down)) { // button has actually been pressed once
+    if (gesture.diff_up > (gesture.THRESHOLD_CLICK_MAX * 4)) { // 4* click time has passed
+        if (print_debug) {
+            Serial.print("Diff up: ");
+            Serial.println(gesture.diff_up);
+            Serial.println(F("Gesture Cancel"));
+        }
         return true;
     }
     return false;
 }
 
 void process_gestures() {
+    if (gesture.last_btn_down > 0)
+        gesture.diff_down = cur_run_ms - gesture.last_btn_down;
+    if (gesture.last_btn_up > 0)
+        gesture.diff_up = cur_run_ms - gesture.last_btn_up;
+    // Serial.print(F("Diff down:"));
+    // Serial.print(gesture.diff_down);
+    // Serial.print(F("; Diff Up:"));
+    // Serial.println(gesture.diff_up);
     if (gesture_FSM.Update()) {
         int new_state = gesture_FSM.GetState();
-        if (new_state != gesture.last_state)
-            Serial.println(gesture_FSM.ActiveStateName());
-        gesture.last_state = new_state;
+        if (new_state != gesture.last_state) {
+            if (print_debug)
+                Serial.println(gesture_FSM.ActiveStateName());
+            gesture.last_state = new_state;
+        }
     }
 }
 
 void read_btn() {
     bool old_state = button_state;
     button_state = (digitalRead(GPIO_BTN) == LOW) ? false : true;
-    if (old_state != button_state)
-        Serial.println(button_state);
+    if (old_state != button_state && print_debug) {
+        char buffer[32];
+        snprintf(buffer, 32, "Button: %d", button_state);
+        Serial.println(buffer);
+    }
 }

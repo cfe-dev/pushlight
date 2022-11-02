@@ -53,7 +53,7 @@
                 "ARDUINO=10813",
                 "ARDUINO_ESP8266_GENERIC",
                 "ARDUINO_ARCH_ESP8266",
-                "ARDUINO_BOARD=\"ESP8266_GENERIC\"",
+                "ARDUINO_BOARD=ESP8266_GENERIC",
                 "LED_BUILTIN=2",
                 "FLASHMODE_DOUT",
                 "ESP8266",
