@@ -3,7 +3,7 @@
     "configurations": [
         {
             "name": "Arduino",
-            "compilerPath": "/home/claus/.arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.0.4-gcc10.3-1757bed/bin/xtensa-lx106-elf-g++",
+            "compilerPath": "/home/pi/.arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.0.4-gcc10.3-1757bed/bin/xtensa-lx106-elf-g++",
             "compilerArgs": [
                 "-U__STRICT_ANSI__",
                 "-w",
@@ -18,23 +18,23 @@
             ],
             "intelliSenseMode": "gcc-x64",
             "includePath": [
-                "/home/claus/.arduino15/packages/esp8266/hardware/esp8266/3.0.2/tools/sdk/include",
-                "/home/claus/.arduino15/packages/esp8266/hardware/esp8266/3.0.2/tools/sdk/lwip2/include",
-                "/home/claus/.arduino15/packages/esp8266/hardware/esp8266/3.0.2/cores/esp8266",
-                "/home/claus/.arduino15/packages/esp8266/hardware/esp8266/3.0.2/variants/generic",
-                "/home/claus/.arduino15/packages/esp8266/hardware/esp8266/3.0.2/libraries/Servo/src",
-                "/home/claus/.arduino15/packages/esp8266/hardware/esp8266/3.0.2/libraries/SoftwareSerial/src",
-                "/home/claus/Arduino/libraries/TinyGPS/src",
-                "/home/claus/Arduino/libraries/YA_FSM/src",
-                "/home/claus/.arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.0.4-gcc10.3-1757bed/xtensa-lx106-elf/include/c++/10.3.0",
-                "/home/claus/.arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.0.4-gcc10.3-1757bed/xtensa-lx106-elf/include/c++/10.3.0/xtensa-lx106-elf",
-                "/home/claus/.arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.0.4-gcc10.3-1757bed/xtensa-lx106-elf/include/c++/10.3.0/backward",
-                "/home/claus/.arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.0.4-gcc10.3-1757bed/lib/gcc/xtensa-lx106-elf/10.3.0/include",
-                "/home/claus/.arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.0.4-gcc10.3-1757bed/lib/gcc/xtensa-lx106-elf/10.3.0/include-fixed",
-                "/home/claus/.arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.0.4-gcc10.3-1757bed/xtensa-lx106-elf/include"
+                "/home/pi/.arduino15/packages/esp8266/hardware/esp8266/3.0.2/tools/sdk/include",
+                "/home/pi/.arduino15/packages/esp8266/hardware/esp8266/3.0.2/tools/sdk/lwip2/include",
+                "/home/pi/.arduino15/packages/esp8266/hardware/esp8266/3.0.2/cores/esp8266",
+                "/home/pi/.arduino15/packages/esp8266/hardware/esp8266/3.0.2/variants/generic",
+                "/home/pi/.arduino15/packages/esp8266/hardware/esp8266/3.0.2/libraries/Servo/src",
+                "/home/pi/.arduino15/packages/esp8266/hardware/esp8266/3.0.2/libraries/SoftwareSerial/src",
+                "/home/pi/Arduino/libraries/TinyGPS/src",
+                "/home/pi/Arduino/libraries/YA_FSM/src",
+                "/home/pi/.arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.0.4-gcc10.3-1757bed/xtensa-lx106-elf/include/c++/10.3.0",
+                "/home/pi/.arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.0.4-gcc10.3-1757bed/xtensa-lx106-elf/include/c++/10.3.0/xtensa-lx106-elf",
+                "/home/pi/.arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.0.4-gcc10.3-1757bed/xtensa-lx106-elf/include/c++/10.3.0/backward",
+                "/home/pi/.arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.0.4-gcc10.3-1757bed/lib/gcc/xtensa-lx106-elf/10.3.0/include",
+                "/home/pi/.arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.0.4-gcc10.3-1757bed/lib/gcc/xtensa-lx106-elf/10.3.0/include-fixed",
+                "/home/pi/.arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.0.4-gcc10.3-1757bed/xtensa-lx106-elf/include"
             ],
             "forcedInclude": [
-                "/home/claus/.arduino15/packages/esp8266/hardware/esp8266/3.0.2/cores/esp8266/Arduino.h"
+                "/home/pi/.arduino15/packages/esp8266/hardware/esp8266/3.0.2/cores/esp8266/Arduino.h"
             ],
             "cStandard": "c11",
             "cppStandard": "c++17",
