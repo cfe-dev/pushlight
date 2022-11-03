@@ -30,14 +30,16 @@ unsigned long cur_run_ms = 0;
 // Job 1, LED setting vars
 const int JOB_INTV_LED = 40;
 
-int brightness = 0; // how bright the LED is (0 = full, 512 = dim, 1023 = off)
-int fadeAmount = 4; // how many points to fade the LED by
+struct t_led_ctrl {
+    int brightness = 0; // how bright the LED is (0 = full, 512 = dim, 1023 = off)
+    int fadeAmount = 4; // how many points to fade the LED by
 
-// const int brightness_max = 1023;
-const int brightness_max = 384;
-const int brightness_min = 0;
-const int fadeAmount_max = 35;
-const int fadeAmount_min = 4;
+    // const int brightness_max = 1023;
+    const int brightness_max = 384;
+    const int brightness_min = 0;
+    const int fadeAmount_max = 35;
+    const int fadeAmount_min = 4;
+} led_ctrl = {};
 
 // ******************
 // Job 2, Servo vars
@@ -45,11 +47,13 @@ const int JOB_INTV_MOTOR = 200;
 
 Servo servo;
 
-int servo_steps = 2;
-int servo_angle = 0;
-const int servo_angle_max = 90;
-const int servo_angle_min = 10;
-bool direction_up = true;
+struct t_servo_ctrl {
+    int steps = 2;
+    int angle = 0;
+    const int angle_max = 90;
+    const int angle_min = 10;
+    bool direction_up = true;
+} servo_ctrl = {};
 
 // ******************
 // Job 3, Pin Value tracking
@@ -225,12 +229,12 @@ void fade_led() {
     // constrain(fadeAmount, fadeAmount_min, fadeAmount_max);
 
     // new: map from servo angle
-    brightness = map_angle_to_brightness(servo_angle);
-    constrain(brightness, brightness_min, brightness_max);
+    led_ctrl.brightness = map_angle_to_brightness(servo_ctrl.angle);
+    constrain(led_ctrl.brightness, led_ctrl.brightness_min, led_ctrl.brightness_max);
 
-    analogWrite(LED_BUILTIN, brightness);
+    analogWrite(LED_BUILTIN, led_ctrl.brightness);
     if (print_debug)
-        Serial.println(fadeAmount);
+        Serial.println(led_ctrl.fadeAmount);
 }
 
 void turn_servo() {
@@ -242,32 +246,32 @@ void turn_servo() {
         // servo_angle = servo_angle + servo_steps;
         // if (servo_angle > 180) servo_angle = 0;
 
-        int servo_angle_prv = servo_angle;
+        int servo_angle_prv = servo_ctrl.angle;
 
-        if (servo_angle > servo_angle_max) servo_angle = servo_angle_max;
-        if (servo_angle < servo_angle_min) servo_angle = servo_angle_min;
+        if (servo_ctrl.angle > servo_ctrl.angle_max) servo_ctrl.angle = servo_ctrl.angle_max;
+        if (servo_ctrl.angle < servo_ctrl.angle_min) servo_ctrl.angle = servo_ctrl.angle_min;
 
-        if (servo_angle == servo_angle_max) direction_up = false;
-        if (servo_angle == servo_angle_min) direction_up = true;
+        if (servo_ctrl.angle == servo_ctrl.angle_max) servo_ctrl.direction_up = false;
+        if (servo_ctrl.angle == servo_ctrl.angle_min) servo_ctrl.direction_up = true;
 
-        if (direction_up) {
-            servo_angle = servo_angle + servo_steps;
+        if (servo_ctrl.direction_up) {
+            servo_ctrl.angle = servo_ctrl.angle + servo_ctrl.steps;
         } else {
-            servo_angle = servo_angle - servo_steps;
+            servo_ctrl.angle = servo_ctrl.angle - servo_ctrl.steps;
         }
 
         // smoothe out servo movement; unnessecary writes cause janks
-        if (servo_angle_prv != servo_angle) {
-            servo.write(servo_angle);
+        if (servo_angle_prv != servo_ctrl.angle) {
+            servo.write(servo_ctrl.angle);
             if (print_debug)
-                Serial.println(servo_angle);
+                Serial.println(servo_ctrl.angle);
         }
     }
 }
 
 int map_angle_to_brightness(int angle) {
-    float ratio = (brightness_max - brightness_min) / (servo_angle_max - servo_angle_min);
-    float fval = ratio * (angle - servo_angle_min) + brightness_min;
+    float ratio = (led_ctrl.brightness_max - led_ctrl.brightness_min) / (servo_ctrl.angle_max - servo_ctrl.angle_min);
+    float fval = ratio * (angle - servo_ctrl.angle_min) + led_ctrl.brightness_min;
     return round(fval);
 }
 
@@ -339,7 +343,7 @@ bool gesture_hold() {
         && (gesture.diff_down > gesture.THRESHOLD_CLICK_MAX)) // and more than time CLICK_MAX time has passed since last button down
     {
         if (gesture.click_counts > 0) { // switch direction if a click has been entered
-            direction_up = !direction_up;
+            servo_ctrl.direction_up = !servo_ctrl.direction_up;
             if (print_debug)
                 Serial.println(F("Gesture Reverse Hold"));
         } else {
@@ -390,8 +394,8 @@ void gesture_check() {
 }
 
 bool gesture_in_position() {
-    if ((servo_angle + gesture.SERVO_TOLERANCE) > gesture.servo_target_pos     // upper range of tolerance window is greater than target
-        && (servo_angle - gesture.SERVO_TOLERANCE) < gesture.servo_target_pos) // AND lower range of tolerance window is less than target
+    if ((servo_ctrl.angle + gesture.SERVO_TOLERANCE) > gesture.servo_target_pos     // upper range of tolerance window is greater than target
+        && (servo_ctrl.angle - gesture.SERVO_TOLERANCE) < gesture.servo_target_pos) // AND lower range of tolerance window is less than target
         return true;
     else
         return false;
@@ -437,10 +441,10 @@ bool gesture_select() {
                 Serial.println(F("Pos Def"));
             break;
         }
-        if (gesture.servo_target_pos > servo_angle)
-            direction_up = true;
-        if (gesture.servo_target_pos < servo_angle)
-            direction_up = false;
+        if (gesture.servo_target_pos > servo_ctrl.angle)
+            servo_ctrl.direction_up = true;
+        if (gesture.servo_target_pos < servo_ctrl.angle)
+            servo_ctrl.direction_up = false;
         return true;
     }
     return false;
