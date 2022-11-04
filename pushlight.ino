@@ -50,8 +50,10 @@ Servo servo;
 struct t_servo_ctrl {
     int steps = 2;
     int angle = 0;
-    const int angle_max = 90;
-    const int angle_min = 10;
+    const int angle_max = 85;
+    const int angle_min = 40;
+    const int target_pos_1 = 45;
+    const int target_pos_2 = 75;
     bool direction_up = true;
 } servo_ctrl = {};
 
@@ -90,8 +92,8 @@ struct t_gesture {
     int last_state = 0;
     bool turn_servo = false;
     bool last_btn_state = false;
-    unsigned long last_btn_up;
-    unsigned long last_btn_down;
+    unsigned long last_btn_up = 0;
+    unsigned long last_btn_down = 0;
     int click_counts = 0;
     int servo_target_pos = 0;
     int diff_down = 0;
@@ -294,6 +296,7 @@ void read_gps() {
 }
 
 void setup_gesture_FSM() {
+    // order of AddState() calls has to match order of enum State!!
     gesture_FSM.AddState(StateName[IDLE], gesture_enter_idle, nullptr, nullptr);
     gesture_FSM.AddState(StateName[MOVING], gesture_enter_move, nullptr, gesture_leave_move);
     gesture_FSM.AddState(StateName[MOVING_TO_POSITION], gesture_enter_move, nullptr, gesture_leave_move);
@@ -425,13 +428,13 @@ bool gesture_select() {
     {
         switch (gesture.click_counts) {
         case 1:
-            gesture.servo_target_pos = 20;
+            gesture.servo_target_pos = servo_ctrl.target_pos_1;
             if (print_debug)
                 Serial.println(F("Pos 1"));
             break;
 
         case 2:
-            gesture.servo_target_pos = 70;
+            gesture.servo_target_pos = servo_ctrl.target_pos_2;
             if (print_debug)
                 Serial.println(F("Pos 2"));
             break;
