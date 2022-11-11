@@ -7,6 +7,9 @@
 */
 
 // #include <Blinker.h>
+// #include <AsyncHTTPSRequest_Generic.h>
+#include <AsyncHTTPRequest_Generic.h>
+#include <ESP8266WiFi.h>
 #include <Servo.h>
 #include <SoftwareSerial.h>
 #include <TinyGPS.h>
@@ -71,7 +74,12 @@ struct t_pinvals {
 const int JOB_INTV_GPS = 500;
 SoftwareSerial gpsSerial(GPIO_GPSRX, GPIO_GPSTX);
 TinyGPS gps;
-float lat = 0, lon = 0;
+struct t_gpsdata {
+    float lat = 0;
+    float lon = 0;
+    unsigned long age = 0;
+    unsigned long last_age = 0;
+} gpsdata = {};
 
 // ******************
 // Job 5, Gestures
@@ -113,6 +121,16 @@ struct t_gesture {
 const int JOB_INTV_READBTN = 200;
 bool button_state = false;
 
+// ******************
+// Job 7, http send data
+const int JOB_INTV_HTTPSEND = 5000;
+WiFiEventHandler WiFiDisconnectHandler;
+struct t_http_ctrl {
+    const char *AP_ssid = "Subcore_NCE2";
+    const char *AP_password = "apPassword123$";
+    AsyncHTTPRequest request;
+} http_ctrl = {};
+
 // Job mgmt data
 
 enum Jobs {
@@ -121,19 +139,21 @@ enum Jobs {
     JOB_TRACKPINS,
     JOB_GPS,
     JOB_GESTURES,
-    JOB_READBTN
+    JOB_READBTN,
+    JOB_HTTPSEND
 };
 
 struct t_job {
     unsigned long last_run_ms;
     const long interval;
-} jobs[6] = {
+} jobs[7] = {
     {0, JOB_INTV_LED},       // ix JOB_LED
     {0, JOB_INTV_MOTOR},     // ix JOB_MOTOR
     {0, JOB_INTV_TRACKPINS}, // ix JOB_TRACKPINS
     {0, JOB_INTV_GPS},       // ix JOB_GPS
     {0, JOB_INTV_GESTURES},  // ix JOB_GESTURES
-    {0, JOB_INTV_READBTN}    // ix JOB_READBTN
+    {0, JOB_INTV_READBTN},   // ix JOB_READBTN
+    {0, JOB_INTV_HTTPSEND}   // ix JOB_HTTPSEND
 };
 
 // change this to enable debug output via Serial Monitor
@@ -169,6 +189,8 @@ void setup() {
 
     // JOB_GESTURES
     setup_gesture_FSM();
+
+    WiFi_setup();
 }
 
 void loop() {
@@ -191,6 +213,7 @@ void loop() {
     if (check_job_interval(jobs[JOB_GPS])) read_gps();
     if (check_job_interval(jobs[JOB_GESTURES])) process_gestures();
     if (check_job_interval(jobs[JOB_READBTN])) read_btn();
+    if (check_job_interval(jobs[JOB_HTTPSEND])) sendRequest();
 }
 
 bool check_job_interval(t_job &job) {
@@ -278,11 +301,20 @@ int map_angle_to_brightness(int angle) {
 }
 
 void read_gps() {
-    // while (gpsSerial.available() > 0) {
-    //     if (gps.encode(gpsSerial.read())) {
-    //         gps.f_get_position(&lat, &lon);
-    //     }
-    // }
+    while (gpsSerial.available() > 0) {
+        if (gps.encode(gpsSerial.read())) {
+            gps.f_get_position(&gpsdata.lat, &gpsdata.lon, &gpsdata.age);
+        }
+    }
+
+    if (gpsdata.lat != TinyGPS::GPS_INVALID_F_ANGLE &&
+        gpsdata.lon != TinyGPS::GPS_INVALID_F_ANGLE &&
+        gpsdata.age != TinyGPS::GPS_INVALID_AGE &&
+        gpsdata.age != gpsdata.last_age) {
+
+        // send data to webservice
+        gpsdata.last_age = gpsdata.age;
+    }
 
     // if (lat != 0 || lon != 0) {
     //     // display position
@@ -496,5 +528,41 @@ void read_btn() {
         char buffer[32];
         snprintf(buffer, 32, "Button: %d", button_state);
         Serial.println(buffer);
+    }
+}
+
+void WiFi_setup() {
+
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(http_ctrl.AP_ssid, http_ctrl.AP_password);
+
+    // disconnectedEventHandler = WiFi.onStationModeDisconnected([](const WiFiEventStationModeDisconnected &event) {
+    //     WiFi.begin(http_ctrl.AP_ssid, http_ctrl.AP_password);
+    // });
+
+    WiFiDisconnectHandler = WiFi.onStationModeDisconnected(onWiFiDisconnect);
+}
+
+void onWiFiDisconnect(const WiFiEventStationModeDisconnected &event) {
+    Serial.println("Disconnected from Wi-Fi, trying to reconnect...");
+    WiFi.disconnect();
+    WiFi.begin(http_ctrl.AP_ssid, http_ctrl.AP_password);
+}
+
+void sendRequest() {
+    static bool requestOpenResult;
+
+    if (WiFi.status() == WL_CONNECTED &&
+        (http_ctrl.request.readyState() == readyStateUnsent ||
+         http_ctrl.request.readyState() == readyStateDone) &&
+        gpsdata.age != TinyGPS::GPS_INVALID_AGE &&
+        gpsdata.age != 0) {
+
+        requestOpenResult = http_ctrl.request.open("GET", "http://worldtimeapi.org/api/timezone/Europe/Vienna.txt");
+
+        if (requestOpenResult) {
+            // Only send() if open() returns true, otherwise the program crashes
+            http_ctrl.request.send();
+        }
     }
 }
