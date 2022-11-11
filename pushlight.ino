@@ -330,7 +330,8 @@ void read_gps() {
                 empty_index = i;
             }
         }
-        if (empty_index == -1) {
+        if (empty_index != -1 &&
+            is_new) {
             gpsdata[empty_index] = gpsdata_new;
         }
     }
