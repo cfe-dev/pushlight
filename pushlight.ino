@@ -46,12 +46,12 @@ struct t_led_ctrl {
 
 // ******************
 // Job 2, Servo vars
-const int JOB_INTV_MOTOR = 200;
+const int JOB_INTV_MOTOR = 50;
 
 Servo servo;
 
 struct t_servo_ctrl {
-    int steps = 2;
+    int steps = 1;
     int angle = 0;
     const int angle_max = 85;
     const int angle_min = 40;
