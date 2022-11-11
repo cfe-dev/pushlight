@@ -74,12 +74,12 @@ struct t_pinvals {
 const int JOB_INTV_GPS = 500;
 SoftwareSerial gpsSerial(GPIO_GPSRX, GPIO_GPSTX);
 TinyGPS gps;
+unsigned long gps_last_age = 0;
 struct t_gpsdata {
-    float lat = 0;
-    float lon = 0;
+    float lat = 0,
+          lon = 0;
     unsigned long age = 0;
-    unsigned long last_age = 0;
-} gpsdata = {};
+} gpsdata[20] = {};
 
 // ******************
 // Job 5, Gestures
@@ -301,19 +301,38 @@ int map_angle_to_brightness(int angle) {
 }
 
 void read_gps() {
+    float lat = 0, lon = 0;
+    unsigned long age;
     while (gpsSerial.available() > 0) {
         if (gps.encode(gpsSerial.read())) {
-            gps.f_get_position(&gpsdata.lat, &gpsdata.lon, &gpsdata.age);
+            gps.f_get_position(&lat, &lon, &age);
         }
     }
 
-    if (gpsdata.lat != TinyGPS::GPS_INVALID_F_ANGLE &&
-        gpsdata.lon != TinyGPS::GPS_INVALID_F_ANGLE &&
-        gpsdata.age != TinyGPS::GPS_INVALID_AGE &&
-        gpsdata.age != gpsdata.last_age) {
+    if (lat != TinyGPS::GPS_INVALID_F_ANGLE &&
+        lon != TinyGPS::GPS_INVALID_F_ANGLE &&
+        age != TinyGPS::GPS_INVALID_AGE &&
+        age != gps_last_age) {
 
-        // send data to webservice
-        gpsdata.last_age = gpsdata.age;
+        t_gpsdata gpsdata_new = {lat, lon, age};
+
+        bool is_new = true;
+        int empty_index = -1;
+
+        for (int i = 0; i++; i < 20) {
+            if (gpsdata[i].age == age) {
+                is_new = false;
+                break;
+            }
+            if (empty_index == -1 &&
+                (gpsdata[i].age == 0 ||
+                 gpsdata[i].age == TinyGPS::GPS_INVALID_AGE)) {
+                empty_index = i;
+            }
+        }
+        if (empty_index == -1) {
+            gpsdata[empty_index] = gpsdata_new;
+        }
     }
 
     // if (lat != 0 || lon != 0) {
@@ -550,19 +569,33 @@ void onWiFiDisconnect(const WiFiEventStationModeDisconnected &event) {
 }
 
 void sendRequest() {
-    static bool requestOpenResult;
+    bool requestOpenResult, sendResult, has_new_data = false;
+
+    for (int i = 0; i++; i < 20) {
+        if (gpsdata[i].age != 0 &&
+            gpsdata[i].age != TinyGPS::GPS_INVALID_AGE) {
+            has_new_data = true;
+        }
+    }
 
     if (WiFi.status() == WL_CONNECTED &&
+        has_new_data &&
         (http_ctrl.request.readyState() == readyStateUnsent ||
-         http_ctrl.request.readyState() == readyStateDone) &&
-        gpsdata.age != TinyGPS::GPS_INVALID_AGE &&
-        gpsdata.age != 0) {
+         http_ctrl.request.readyState() == readyStateDone)) {
 
+        // TODO - loop over gpsdata for valid entries; create POST body with data; POST to pushlight_srv
         requestOpenResult = http_ctrl.request.open("GET", "http://worldtimeapi.org/api/timezone/Europe/Vienna.txt");
 
         if (requestOpenResult) {
             // Only send() if open() returns true, otherwise the program crashes
-            http_ctrl.request.send();
+            sendResult = http_ctrl.request.send();
+            if (sendResult) {
+                for (int i = 0; i++; i < 20) {
+                    gpsdata[i].lat = TinyGPS::GPS_INVALID_F_ANGLE;
+                    gpsdata[i].lon = TinyGPS::GPS_INVALID_F_ANGLE;
+                    gpsdata[i].age = TinyGPS::GPS_INVALID_AGE;
+                }
+            }
         }
     }
 }
