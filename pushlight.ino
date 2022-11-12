@@ -82,6 +82,7 @@ struct t_gpsdata {
     float lat = 0,
           lon = 0;
     unsigned long age = 0;
+    // int servo_angle = 0;
 } gpsdata[GPS_CACHE_SIZE] = {};
 
 // ******************
@@ -128,7 +129,9 @@ bool button_state = false;
 // Job 7, http send data
 const int JOB_INTV_HTTPSEND = 5000;
 WiFiEventHandler WiFiDisconnectHandler;
-DynamicJsonDocument http_json_doc(2048);
+const size_t capacity =
+    JSON_ARRAY_SIZE(3) + 3 * JSON_OBJECT_SIZE(7) + JSON_OBJECT_SIZE(11);
+DynamicJsonDocument http_json_doc(capacity);
 struct t_http_ctrl {
     const char *AP_ssid = "Subcore_NCE2";
     const char *AP_password = "apPassword123$";
@@ -344,15 +347,17 @@ void read_gps() {
         }
     }
 
-    // if (lat != 0 || lon != 0) {
-    //     // display position
-    //     // Serial.print("Position: ");
-    //     Serial.print("Latitude:");
-    //     Serial.print(lat, 6);
-    //     Serial.print(";");
-    //     Serial.print("Longitude:");
-    //     Serial.println(lon, 6);
-    // }
+    if (print_debug && (lat != 0 || lon != 0)) {
+        // display position
+        // Serial.print("Position: ");
+        Serial.print("Latitude:");
+        Serial.print(lat, 6);
+        Serial.print(";");
+        Serial.print("Longitude:");
+        Serial.print(lon, 6);
+        Serial.print("Age:");
+        Serial.println(age);
+    }
 }
 
 void setup_gesture_FSM() {
@@ -582,43 +587,48 @@ void WiFi_sendRequest() {
 
     bool requestOpenResult, sendResult = false;
     int datachg_count = count_gps_data_changes(gpsdata);
+    // int datachg_count = 1;
+
+    if (print_debug)
+        Serial.println("start wifi request");
 
     if (WiFi.status() == WL_CONNECTED &&
         datachg_count > 0 &&
         (http_ctrl.request.readyState() == readyStateUnsent ||
          http_ctrl.request.readyState() == readyStateDone)) {
 
-        // int j = 0;
-        // t_gpsdata gpsdata_post[datachg_count];
+        if (print_debug)
+            Serial.println("connected & active");
 
         http_json_doc.clear();
-        JsonArray http_json_array = http_json_doc.to<JsonArray>();
+        http_json_doc["sensor"] = "gps";
+        // JsonArray http_json_array = http_json_doc.to<JsonArray>();
+        // JsonArray http_gpsdata_array = http_json_doc.createNestedArray("gpsdata");
+        // JsonObject http_gpsdata = http_gpsdata_array.createNestedObject();
 
         for (int i = 0; i++; i < GPS_CACHE_SIZE) {
             if (gpsdata[i].age != TinyGPS::GPS_INVALID_AGE &&
                 gpsdata[i].age != 0) {
 
-                // gpsdata_post[j] = gpsdata[i];
-                // j++;
-                JsonObject http_json_nested = http_json_array.createNestedObject();
-                http_json_nested["lat"] = gpsdata[i].lat;
-                http_json_nested["lon"] = gpsdata[i].lon;
-                http_json_nested["age"] = gpsdata[i].age;
+                http_json_doc["gpsdata"][i]["lat"] = gpsdata[i].lat;
+                http_json_doc["gpsdata"][i]["lon"] = gpsdata[i].lon;
+                http_json_doc["gpsdata"][i]["age"] = gpsdata[i].age;
+                http_json_doc["gpsdata"][i]["servo_angle"] = servo_ctrl.angle;
             }
         }
 
         http_ctrl.request.setReqHeader("Content-Type", "application/x-www-form-urlencoded");
 
-        // String httpRequestData = "api_key=<   >&sensor=BME280&value1=24.25&value2=49.54&value3=1005.14";
         String httpRequestData = "";
         serializeJson(http_json_doc, httpRequestData);
+        if (print_debug)
+            Serial.println(httpRequestData);
 
-        // requestOpenResult = http_ctrl.request.open("GET", "http://worldtimeapi.org/api/timezone/Europe/Vienna.txt");
-        requestOpenResult = http_ctrl.request.open("POST", "http://cfe.co.at/pushlight_srv/collect");
+        // requestOpenResult = http_ctrl.request.open("POST", "http://memnon.cfe.co.at/pushlight_srv/collect");
+        requestOpenResult = http_ctrl.request.open("POST", "http://memnon.cfe.co.at:8220/collect");
 
         if (requestOpenResult) {
             // Only send() if open() returns true, otherwise the program crashes
-            // sendResult = http_ctrl.request.send();
             bool httpSendSuccess = http_ctrl.request.send(httpRequestData);
 
             // reset gps data buffer after successful transfer
@@ -626,7 +636,11 @@ void WiFi_sendRequest() {
                 200 <= http_ctrl.request.responseHTTPcode() < 300) {
                 init_gps_data(gpsdata);
             }
+            if (httpSendSuccess && print_debug)
+                Serial.println(http_ctrl.request.responseHTTPcode());
         }
+    } else {
+        Serial.println("http request not ready.");
     }
 }
 
