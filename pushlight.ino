@@ -8,6 +8,7 @@
 
 // #include <Blinker.h>
 // #include <AsyncHTTPSRequest_Generic.h>
+#include <ArduinoJson.h>
 #include <AsyncHTTPRequest_Generic.h>
 #include <ESP8266WiFi.h>
 #include <Servo.h>
@@ -26,6 +27,8 @@
 
 #define GPIO_COUNT 17
 //#define GPIO_COUNT 16
+
+#define GPS_CACHE_SIZE 100
 
 unsigned long cur_run_ms = 0;
 
@@ -79,7 +82,7 @@ struct t_gpsdata {
     float lat = 0,
           lon = 0;
     unsigned long age = 0;
-} gpsdata[20] = {};
+} gpsdata[GPS_CACHE_SIZE] = {};
 
 // ******************
 // Job 5, Gestures
@@ -125,6 +128,7 @@ bool button_state = false;
 // Job 7, http send data
 const int JOB_INTV_HTTPSEND = 5000;
 WiFiEventHandler WiFiDisconnectHandler;
+DynamicJsonDocument http_json_doc(2048);
 struct t_http_ctrl {
     const char *AP_ssid = "Subcore_NCE2";
     const char *AP_password = "apPassword123$";
@@ -213,7 +217,7 @@ void loop() {
     if (check_job_interval(jobs[JOB_GPS])) read_gps();
     if (check_job_interval(jobs[JOB_GESTURES])) process_gestures();
     if (check_job_interval(jobs[JOB_READBTN])) read_btn();
-    if (check_job_interval(jobs[JOB_HTTPSEND])) sendRequest();
+    if (check_job_interval(jobs[JOB_HTTPSEND])) WiFi_sendRequest();
 }
 
 bool check_job_interval(t_job &job) {
@@ -302,24 +306,28 @@ int map_angle_to_brightness(int angle) {
 
 void read_gps() {
     float lat = 0, lon = 0;
-    unsigned long age;
+    unsigned long age = 0;
     while (gpsSerial.available() > 0) {
         if (gps.encode(gpsSerial.read())) {
             gps.f_get_position(&lat, &lon, &age);
         }
     }
 
-    if (lat != TinyGPS::GPS_INVALID_F_ANGLE &&
+    if (lat != 0 &&
+        lon != 0 &&
+        age != 0 &&
+        lat != TinyGPS::GPS_INVALID_F_ANGLE &&
         lon != TinyGPS::GPS_INVALID_F_ANGLE &&
         age != TinyGPS::GPS_INVALID_AGE &&
         age != gps_last_age) {
 
-        t_gpsdata gpsdata_new = {lat, lon, age};
+        gps_last_age = age;
 
+        t_gpsdata gpsdata_new = {lat, lon, age};
         bool is_new = true;
         int empty_index = -1;
 
-        for (int i = 0; i++; i < 20) {
+        for (int i = 0; i++; i < GPS_CACHE_SIZE) {
             if (gpsdata[i].age == age) {
                 is_new = false;
                 break;
@@ -569,34 +577,74 @@ void onWiFiDisconnect(const WiFiEventStationModeDisconnected &event) {
     WiFi.begin(http_ctrl.AP_ssid, http_ctrl.AP_password);
 }
 
-void sendRequest() {
-    bool requestOpenResult, sendResult, has_new_data = false;
+void WiFi_sendRequest() {
+    if (WiFi.status() != WL_CONNECTED) return;
 
-    for (int i = 0; i++; i < 20) {
-        if (gpsdata[i].age != 0 &&
-            gpsdata[i].age != TinyGPS::GPS_INVALID_AGE) {
-            has_new_data = true;
-        }
-    }
+    bool requestOpenResult, sendResult = false;
+    int datachg_count = count_gps_data_changes(gpsdata);
 
     if (WiFi.status() == WL_CONNECTED &&
-        has_new_data &&
+        datachg_count > 0 &&
         (http_ctrl.request.readyState() == readyStateUnsent ||
          http_ctrl.request.readyState() == readyStateDone)) {
 
-        // TODO - loop over gpsdata for valid entries; create POST body with data; POST to pushlight_srv
-        requestOpenResult = http_ctrl.request.open("GET", "http://worldtimeapi.org/api/timezone/Europe/Vienna.txt");
+        // int j = 0;
+        // t_gpsdata gpsdata_post[datachg_count];
+
+        http_json_doc.clear();
+        JsonArray http_json_array = http_json_doc.to<JsonArray>();
+
+        for (int i = 0; i++; i < GPS_CACHE_SIZE) {
+            if (gpsdata[i].age != TinyGPS::GPS_INVALID_AGE &&
+                gpsdata[i].age != 0) {
+
+                // gpsdata_post[j] = gpsdata[i];
+                // j++;
+                JsonObject http_json_nested = http_json_array.createNestedObject();
+                http_json_nested["lat"] = gpsdata[i].lat;
+                http_json_nested["lon"] = gpsdata[i].lon;
+                http_json_nested["age"] = gpsdata[i].age;
+            }
+        }
+
+        http_ctrl.request.setReqHeader("Content-Type", "application/x-www-form-urlencoded");
+
+        // String httpRequestData = "api_key=<   >&sensor=BME280&value1=24.25&value2=49.54&value3=1005.14";
+        String httpRequestData = "";
+        serializeJson(http_json_doc, httpRequestData);
+
+        // requestOpenResult = http_ctrl.request.open("GET", "http://worldtimeapi.org/api/timezone/Europe/Vienna.txt");
+        requestOpenResult = http_ctrl.request.open("POST", "http://cfe.co.at/pushlight_srv/collect");
 
         if (requestOpenResult) {
             // Only send() if open() returns true, otherwise the program crashes
-            sendResult = http_ctrl.request.send();
-            if (sendResult) {
-                for (int i = 0; i++; i < 20) {
-                    gpsdata[i].lat = TinyGPS::GPS_INVALID_F_ANGLE;
-                    gpsdata[i].lon = TinyGPS::GPS_INVALID_F_ANGLE;
-                    gpsdata[i].age = TinyGPS::GPS_INVALID_AGE;
-                }
+            // sendResult = http_ctrl.request.send();
+            bool httpSendSuccess = http_ctrl.request.send(httpRequestData);
+
+            // reset gps data buffer after successful transfer
+            if (httpSendSuccess &&
+                200 <= http_ctrl.request.responseHTTPcode() < 300) {
+                init_gps_data(gpsdata);
             }
         }
     }
+}
+
+static void init_gps_data(t_gpsdata data[]) {
+    for (int i = 0; i++; i < GPS_CACHE_SIZE) {
+        data[i].lat = TinyGPS::GPS_INVALID_F_ANGLE;
+        data[i].lon = TinyGPS::GPS_INVALID_F_ANGLE;
+        data[i].age = TinyGPS::GPS_INVALID_AGE;
+    }
+}
+
+static int count_gps_data_changes(t_gpsdata data[]) {
+    int datachg_count = 0;
+    for (int i = 0; i++; i < GPS_CACHE_SIZE) {
+        if (data[i].age != 0 &&
+            data[i].age != TinyGPS::GPS_INVALID_AGE) {
+            datachg_count++;
+        }
+    }
+    return datachg_count;
 }

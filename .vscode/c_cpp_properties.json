@@ -23,6 +23,7 @@
                 "/home/claus/dev/diy_stuff/Arduino/pushlight/pushlight/build/core",
                 "/home/claus/.arduino15/packages/esp8266/hardware/esp8266/3.0.2/cores/esp8266",
                 "/home/claus/.arduino15/packages/esp8266/hardware/esp8266/3.0.2/variants/generic",
+                "/home/claus/Arduino/libraries/ArduinoJson/src",
                 "/home/claus/Arduino/libraries/AsyncHTTPRequest_Generic/src",
                 "/home/claus/Arduino/libraries/ESPAsyncTCP/src",
                 "/home/claus/.arduino15/packages/esp8266/hardware/esp8266/3.0.2/libraries/ESP8266WiFi/src",
