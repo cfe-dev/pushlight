@@ -133,8 +133,8 @@ const size_t capacity =
     JSON_ARRAY_SIZE(3) + 3 * JSON_OBJECT_SIZE(7) + JSON_OBJECT_SIZE(11);
 DynamicJsonDocument http_json_doc(capacity);
 struct t_http_ctrl {
-    const char *AP_ssid = "Subcore_NCE2";
-    const char *AP_password = "apPassword123$";
+    const char *AP_ssid = "";
+    const char *AP_password = "";
     AsyncHTTPRequest request;
 } http_ctrl = {};
 
@@ -330,7 +330,7 @@ void read_gps() {
         bool is_new = true;
         int empty_index = -1;
 
-        for (int i = 0; i++; i < GPS_CACHE_SIZE) {
+        for (int i = 0; i < GPS_CACHE_SIZE; i++) {
             if (gpsdata[i].age == age) {
                 is_new = false;
                 break;
@@ -606,7 +606,7 @@ void WiFi_sendRequest() {
         // JsonArray http_gpsdata_array = http_json_doc.createNestedArray("gpsdata");
         // JsonObject http_gpsdata = http_gpsdata_array.createNestedObject();
 
-        for (int i = 0; i++; i < GPS_CACHE_SIZE) {
+        for (int i = 0; i < GPS_CACHE_SIZE; i++) {
             if (gpsdata[i].age != TinyGPS::GPS_INVALID_AGE &&
                 gpsdata[i].age != 0) {
 
@@ -645,7 +645,7 @@ void WiFi_sendRequest() {
 }
 
 static void init_gps_data(t_gpsdata data[]) {
-    for (int i = 0; i++; i < GPS_CACHE_SIZE) {
+    for (int i = 0; i < GPS_CACHE_SIZE; i++) {
         data[i].lat = TinyGPS::GPS_INVALID_F_ANGLE;
         data[i].lon = TinyGPS::GPS_INVALID_F_ANGLE;
         data[i].age = TinyGPS::GPS_INVALID_AGE;
@@ -654,7 +654,7 @@ static void init_gps_data(t_gpsdata data[]) {
 
 static int count_gps_data_changes(t_gpsdata data[]) {
     int datachg_count = 0;
-    for (int i = 0; i++; i < GPS_CACHE_SIZE) {
+    for (int i = 0; i < GPS_CACHE_SIZE; i++) {
         if (data[i].age != 0 &&
             data[i].age != TinyGPS::GPS_INVALID_AGE) {
             datachg_count++;
