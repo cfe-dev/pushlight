@@ -1,10 +1,10 @@
 /*
-  Pushlight
-  cfe-dev
-  * controls a servo based on gestures implemented in a simple state machine.
-  * dims the internal LED, brightness mapped from the servo position
-  * collects GPS data
-*/
+ * Pushlight
+ * cfe-dev
+ * controls a servo based on gestures implemented in a simple state machine.
+ * dims the internal LED, brightness mapped from the servo position
+ * collects GPS data
+ */
 
 // #include <Blinker.h>
 // #include <AsyncHTTPSRequest_Generic.h>
@@ -82,7 +82,7 @@ struct t_gpsdata {
     float lat = 0,
           lon = 0;
     unsigned long age = 0;
-    // int servo_angle = 0;
+    int servo_angle = 0;
 } gpsdata[GPS_CACHE_SIZE] = {};
 
 // ******************
@@ -130,7 +130,7 @@ bool button_state = false;
 const int JOB_INTV_HTTPSEND = 5000;
 WiFiEventHandler WiFiDisconnectHandler;
 const size_t capacity =
-    JSON_ARRAY_SIZE(3) + 3 * JSON_OBJECT_SIZE(7) + JSON_OBJECT_SIZE(11);
+    JSON_ARRAY_SIZE(GPS_CACHE_SIZE) + GPS_CACHE_SIZE * JSON_OBJECT_SIZE(10);
 DynamicJsonDocument http_json_doc(capacity);
 struct t_http_ctrl {
     const char *AP_ssid = "";
@@ -189,6 +189,8 @@ void setup() {
     pinvals[GPIO_BTN].val = 0;
     pinvals[GPIO_GPSRX].val = 0;
     pinvals[GPIO_GPSTX].val = 0;
+
+    init_gps_data(gpsdata);
 
     // JOB_MOTOR
     servo.attach(GPIO_SERVO);
@@ -326,7 +328,7 @@ void read_gps() {
 
         gps_last_age = age;
 
-        t_gpsdata gpsdata_new = {lat, lon, age};
+        t_gpsdata gpsdata_new = {lat, lon, age, servo_ctrl.angle};
         bool is_new = true;
         int empty_index = -1;
 
@@ -586,8 +588,8 @@ void WiFi_sendRequest() {
     if (WiFi.status() != WL_CONNECTED) return;
 
     bool requestOpenResult, sendResult = false;
-    int datachg_count = count_gps_data_changes(gpsdata);
-    // int datachg_count = 1;
+    // int datachg_count = count_gps_data_changes(gpsdata);
+    int datachg_count = 1;
 
     if (print_debug)
         Serial.println("start wifi request");
@@ -606,14 +608,16 @@ void WiFi_sendRequest() {
         // JsonArray http_gpsdata_array = http_json_doc.createNestedArray("gpsdata");
         // JsonObject http_gpsdata = http_gpsdata_array.createNestedObject();
 
+        int j = 0;
         for (int i = 0; i < GPS_CACHE_SIZE; i++) {
             if (gpsdata[i].age != TinyGPS::GPS_INVALID_AGE &&
                 gpsdata[i].age != 0) {
 
-                http_json_doc["gpsdata"][i]["lat"] = gpsdata[i].lat;
-                http_json_doc["gpsdata"][i]["lon"] = gpsdata[i].lon;
-                http_json_doc["gpsdata"][i]["age"] = gpsdata[i].age;
-                http_json_doc["gpsdata"][i]["servo_angle"] = servo_ctrl.angle;
+                http_json_doc["gpsdata"][j]["lat"] = gpsdata[i].lat;
+                http_json_doc["gpsdata"][j]["lon"] = gpsdata[i].lon;
+                http_json_doc["gpsdata"][j]["age"] = gpsdata[i].age;
+                http_json_doc["gpsdata"][j]["servo_angle"] = gpsdata[i].servo_angle;
+                j++;
             }
         }
 
