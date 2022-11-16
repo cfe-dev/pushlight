@@ -30,6 +30,10 @@
 
 #define GPS_CACHE_SIZE 100
 
+// client id for server communication
+// change for every unique consumer
+#define PUSHLIGHT_CLIENT_ID 1
+
 unsigned long cur_run_ms = 0;
 
 // ******************
@@ -135,6 +139,7 @@ DynamicJsonDocument http_json_doc(capacity);
 struct t_http_ctrl {
     const char *AP_ssid = "";
     const char *AP_password = "";
+
     AsyncHTTPRequest request;
 } http_ctrl = {};
 
@@ -603,6 +608,7 @@ void WiFi_sendRequest() {
             Serial.println("connected & active");
 
         http_json_doc.clear();
+        http_json_doc["pushlight_client_id"] = PUSHLIGHT_CLIENT_ID;
         http_json_doc["sensor"] = "gps";
         // JsonArray http_json_array = http_json_doc.to<JsonArray>();
         // JsonArray http_gpsdata_array = http_json_doc.createNestedArray("gpsdata");
