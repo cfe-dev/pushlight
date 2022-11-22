@@ -85,7 +85,12 @@ unsigned long gps_last_age = 0;
 struct t_gpsdata {
     float lat = 0,
           lon = 0;
-    unsigned long age = 0;
+    unsigned long age = 0,
+                  date = 0,
+                  time = 0;
+    float altitude = 0,
+          course = 0,
+          speed_kmph = 0;
     int servo_angle = 0;
 } gpsdata[GPS_CACHE_SIZE] = {};
 
@@ -134,13 +139,12 @@ bool button_state = false;
 const int JOB_INTV_HTTPSEND = 5000;
 WiFiEventHandler WiFiDisconnectHandler;
 const size_t capacity =
-    JSON_ARRAY_SIZE(GPS_CACHE_SIZE) + GPS_CACHE_SIZE * JSON_OBJECT_SIZE(10);
+    JSON_ARRAY_SIZE(GPS_CACHE_SIZE) + GPS_CACHE_SIZE * JSON_OBJECT_SIZE(90);
 DynamicJsonDocument http_json_doc(capacity);
 struct t_http_ctrl {
     const char *AP_ssid = "";
     const char *AP_password = "";
     const char *PUSHLIGHT_SRV_ENDPOINT = "";
-
     AsyncHTTPRequest request;
 } http_ctrl = {};
 
@@ -317,10 +321,16 @@ int map_angle_to_brightness(int angle) {
 
 void read_gps() {
     float lat = 0, lon = 0;
-    unsigned long age = 0;
+    unsigned long age = 0, date = 0, time = 0, chars;
+    float altitude = 0, course = 0, speed_kmph = 0;
     while (gpsSerial.available() > 0) {
         if (gps.encode(gpsSerial.read())) {
+            gps.get_datetime(&date, &time, &age);
+            // ignore/overwrite datetime age
             gps.f_get_position(&lat, &lon, &age);
+            altitude = gps.f_altitude();
+            course = gps.f_course();
+            speed_kmph = gps.f_speed_kmph();
         }
     }
 
@@ -334,7 +344,9 @@ void read_gps() {
 
         gps_last_age = age;
 
-        t_gpsdata gpsdata_new = {lat, lon, age, servo_ctrl.angle};
+        t_gpsdata gpsdata_new = {lat, lon, age,
+                                 date, time, altitude,
+                                 course, speed_kmph, servo_ctrl.angle};
         bool is_new = true;
         int empty_index = -1;
 
@@ -596,8 +608,8 @@ void WiFi_sendRequest() {
     AsyncHTTPRequest &req = http_ctrl.request;
 
     bool requestOpenResult, sendResult = false;
-    // int datachg_count = count_gps_data_changes(gpsdata);
-    int datachg_count = 1;
+    int datachg_count = count_gps_data_changes(gpsdata);
+    // int datachg_count = 1;
 
     if (print_debug)
         Serial.println("start wifi request");
@@ -622,13 +634,27 @@ void WiFi_sendRequest() {
             if (gpsdata[i].age != TinyGPS::GPS_INVALID_AGE &&
                 gpsdata[i].age != 0) {
 
+                http_json_doc["gpsdata"][j]["data_id"] = 0;
                 http_json_doc["gpsdata"][j]["lat"] = gpsdata[i].lat;
                 http_json_doc["gpsdata"][j]["lon"] = gpsdata[i].lon;
                 http_json_doc["gpsdata"][j]["age"] = gpsdata[i].age;
+                http_json_doc["gpsdata"][j]["date"] = gpsdata[i].date;
+                http_json_doc["gpsdata"][j]["time"] = gpsdata[i].time;
+                http_json_doc["gpsdata"][j]["altitude"] = gpsdata[i].altitude;
+                http_json_doc["gpsdata"][j]["course"] = gpsdata[i].course;
+                http_json_doc["gpsdata"][j]["speed_kmph"] = gpsdata[i].speed_kmph;
                 http_json_doc["gpsdata"][j]["servo_angle"] = gpsdata[i].servo_angle;
                 j++;
             }
         }
+
+        // test data
+        // for (int j = 0; j < 2; j++) {
+        //     http_json_doc["gpsdata"][j]["lat"] = j;
+        //     http_json_doc["gpsdata"][j]["lon"] = (j * 2);
+        //     http_json_doc["gpsdata"][j]["age"] = cur_run_ms;
+        //     http_json_doc["gpsdata"][j]["servo_angle"] = (j % 180);
+        // }
 
         req.setReqHeader("Content-Type", "application/x-www-form-urlencoded");
 
@@ -652,7 +678,8 @@ void WiFi_sendRequest() {
                 Serial.println(req.responseHTTPcode());
         }
     } else {
-        Serial.println("http request not ready.");
+        if (print_debug)
+            Serial.println("http request not ready.");
     }
 }
 
