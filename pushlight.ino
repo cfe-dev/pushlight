@@ -6,7 +6,6 @@
  * collects GPS data
  */
 
-// #include <Blinker.h>
 // #include <AsyncHTTPSRequest_Generic.h>
 #include <ArduinoJson.h>
 #include <AsyncHTTPRequest_Generic.h>
@@ -81,7 +80,8 @@ struct t_pinvals {
 const int JOB_INTV_GPS = 500;
 SoftwareSerial gpsSerial(GPIO_GPSRX, GPIO_GPSTX);
 TinyGPS gps;
-unsigned long gps_last_age = 0;
+unsigned long gps_last_date = 0,
+              gps_last_time = 0;
 struct t_gpsdata {
     float lat = 0,
           lon = 0;
@@ -93,6 +93,8 @@ struct t_gpsdata {
           speed_kmph = 0;
     int servo_angle = 0;
 } gpsdata[GPS_CACHE_SIZE] = {};
+int gps_print_debug_cnt = 0;
+const int gps_print_debug_skip = 6;
 
 // ******************
 // Job 5, Gestures
@@ -139,12 +141,13 @@ bool button_state = false;
 const int JOB_INTV_HTTPSEND = 5000;
 WiFiEventHandler WiFiDisconnectHandler;
 const size_t capacity =
-    JSON_ARRAY_SIZE(GPS_CACHE_SIZE) + GPS_CACHE_SIZE * JSON_OBJECT_SIZE(90);
+    JSON_ARRAY_SIZE(GPS_CACHE_SIZE) + GPS_CACHE_SIZE * JSON_OBJECT_SIZE(10);
 DynamicJsonDocument http_json_doc(capacity);
 struct t_http_ctrl {
     const char *AP_ssid = "";
     const char *AP_password = "";
     const char *PUSHLIGHT_SRV_ENDPOINT = "";
+
     AsyncHTTPRequest request;
 } http_ctrl = {};
 
@@ -174,12 +177,12 @@ struct t_job {
 };
 
 // change this to enable debug output via Serial Monitor
-bool print_debug = false;
+bool print_debug = true;
 
 void setup() {
     Serial.begin(115200);
-    if (print_debug)
-        Serial.println(F("Pushlight Start!"));
+    // if (print_debug)
+    Serial.println(F("Pushlight Start!"));
 
     gpsSerial.begin(9600);
 
@@ -277,8 +280,10 @@ void fade_led() {
     constrain(led_ctrl.brightness, led_ctrl.brightness_min, led_ctrl.brightness_max);
 
     analogWrite(LED_BUILTIN, led_ctrl.brightness);
-    if (print_debug)
-        Serial.println(led_ctrl.fadeAmount);
+    // if (print_debug) {
+    //     Serial.print(F("fadeamount: "));
+    //     Serial.println(led_ctrl.fadeAmount);
+    // }
 }
 
 void turn_servo() {
@@ -307,8 +312,10 @@ void turn_servo() {
         // smoothe out servo movement; unnessecary writes cause janks
         if (servo_angle_prv != servo_ctrl.angle) {
             servo.write(servo_ctrl.angle);
-            if (print_debug)
+            if (print_debug) {
+                Serial.print(F("servo angle: "));
                 Serial.println(servo_ctrl.angle);
+            }
         }
     }
 }
@@ -321,62 +328,112 @@ int map_angle_to_brightness(int angle) {
 
 void read_gps() {
     float lat = 0, lon = 0;
-    unsigned long age = 0, date = 0, time = 0, chars;
+    unsigned long age = 0, date = 0, time = 0;
     float altitude = 0, course = 0, speed_kmph = 0;
+    int year;
+    byte month, day, hour, minute, second, hundredths;
     while (gpsSerial.available() > 0) {
         if (gps.encode(gpsSerial.read())) {
+
+            // use get_datetime for duplication checks within this program
+            // but use crack_datetime values for transmission to pushlight_srv
             gps.get_datetime(&date, &time, &age);
-            // ignore/overwrite datetime age
+            gps.crack_datetime(&year, &month, &day, &hour, &minute, &second, &hundredths, &age);
+
+            // ignore/overwrite datetime age value
             gps.f_get_position(&lat, &lon, &age);
-            altitude = gps.f_altitude();
-            course = gps.f_course();
-            speed_kmph = gps.f_speed_kmph();
+
+            // don't proceed without any one of these four data points
+            if (lon == TinyGPS::GPS_INVALID_F_ANGLE || lat == TinyGPS::GPS_INVALID_F_ANGLE ||
+                date == TinyGPS::GPS_INVALID_DATE || time == TinyGPS::GPS_INVALID_TIME) {
+                lon = 0;
+                lat = 0;
+                date = 0;
+                time = 0;
+            } else {
+                // recalculate date & time from crack_datetime(); get_datetime() omits leading zeroes,
+                // so there would be no distinction between 1.11. and 11.1.
+                // these are simple INTs; do not use for date/time calculations!
+                date = (10000 * year + 100 * month + day);
+                time = (1000000 * hour + 10000 * minute + 100 * second + hundredths);
+
+                altitude = gps.f_altitude();
+                course = gps.f_course();
+                speed_kmph = gps.f_speed_kmph();
+
+                if (age == TinyGPS::GPS_INVALID_AGE) age = 0;
+                if (altitude == TinyGPS::GPS_INVALID_F_ALTITUDE) altitude = 0;
+                if (course == TinyGPS::GPS_INVALID_F_ANGLE) course = 0;
+                if (speed_kmph == TinyGPS::GPS_INVALID_F_SPEED) speed_kmph = 0;
+
+                if (!(date == gps_last_date &&
+                      time == gps_last_time)) {
+
+                    gps_last_date = date;
+                    gps_last_time = time;
+
+                    t_gpsdata gpsdata_new = {lat, lon, age,
+                                             date, time, altitude,
+                                             course, speed_kmph, servo_ctrl.angle};
+                    bool is_new = true;
+                    int next_empty_index = -1;
+
+                    for (int i = 0; i < GPS_CACHE_SIZE; i++) {
+                        if (gpsdata[i].date == date &&
+                            gpsdata[i].time == time) {
+                            is_new = false;
+                            break;
+                        }
+                        if (next_empty_index == -1 &&
+                            (gpsdata[i].date == 0 ||
+                             gpsdata[i].time == 0)) {
+                            next_empty_index = i;
+                        }
+                    }
+                    if (next_empty_index != -1 && is_new) {
+                        gpsdata[next_empty_index] = gpsdata_new;
+                    }
+                    if (print_debug) {
+                        Serial.print("empty ix:");
+                        Serial.print(next_empty_index);
+                        Serial.print("; ");
+                        Serial.print("is new:");
+                        Serial.print(is_new);
+                        Serial.println("; ");
+                    }
+                }
+            }
         }
     }
 
-    if (lat != 0 &&
-        lon != 0 &&
-        age != 0 &&
-        lat != TinyGPS::GPS_INVALID_F_ANGLE &&
-        lon != TinyGPS::GPS_INVALID_F_ANGLE &&
-        age != TinyGPS::GPS_INVALID_AGE &&
-        age != gps_last_age) {
-
-        gps_last_age = age;
-
-        t_gpsdata gpsdata_new = {lat, lon, age,
-                                 date, time, altitude,
-                                 course, speed_kmph, servo_ctrl.angle};
-        bool is_new = true;
-        int empty_index = -1;
-
-        for (int i = 0; i < GPS_CACHE_SIZE; i++) {
-            if (gpsdata[i].age == age) {
-                is_new = false;
-                break;
-            }
-            if (empty_index == -1 &&
-                (gpsdata[i].age == 0 ||
-                 gpsdata[i].age == TinyGPS::GPS_INVALID_AGE)) {
-                empty_index = i;
-            }
-        }
-        if (empty_index != -1 &&
-            is_new) {
-            gpsdata[empty_index] = gpsdata_new;
-        }
-    }
-
-    if (print_debug && (lat != 0 || lon != 0)) {
-        // display position
-        // Serial.print("Position: ");
-        Serial.print("Latitude:");
+    if (print_debug && (gps_print_debug_cnt < gps_print_debug_skip && lat == 0 && lon == 0)) {
+        gps_print_debug_cnt++;
+    } else if (print_debug && (gps_print_debug_cnt >= gps_print_debug_skip || lat != 0 || lon != 0)) {
+        Serial.print("Lat:");
         Serial.print(lat, 6);
-        Serial.print(";");
-        Serial.print("Longitude:");
+        Serial.print("; ");
+        Serial.print("Lon:");
         Serial.print(lon, 6);
+        Serial.print("; ");
         Serial.print("Age:");
-        Serial.println(age);
+        Serial.print(age);
+        Serial.print("; ");
+        Serial.print("Date:");
+        Serial.print(date);
+        Serial.print("; ");
+        Serial.print("Time:");
+        Serial.print(time);
+        Serial.print("; ");
+        Serial.print(F("lastdt:"));
+        Serial.print(gps_last_date);
+        Serial.print("; ");
+        Serial.print(F("lastti:"));
+        Serial.print(gps_last_time);
+        Serial.print("; ");
+        Serial.print(F("gps_chg_cnt: "));
+        Serial.print(count_gps_data_changes(gpsdata));
+        Serial.println("; ");
+        gps_print_debug_cnt = 0;
     }
 }
 
@@ -567,8 +624,10 @@ void process_gestures() {
     if (gesture_FSM.Update()) {
         int new_state = gesture_FSM.GetState();
         if (new_state != gesture_ctrl.last_state) {
-            if (print_debug)
+            if (print_debug) {
+                Serial.print(F("ActiveState: "));
                 Serial.println(gesture_FSM.ActiveStateName());
+            }
             gesture_ctrl.last_state = new_state;
         }
     }
@@ -603,7 +662,7 @@ void onWiFiDisconnect(const WiFiEventStationModeDisconnected &event) {
 }
 
 void WiFi_sendRequest() {
-    if (WiFi.status() != WL_CONNECTED) return;
+    // if (WiFi.status() != WL_CONNECTED) return;
 
     AsyncHTTPRequest &req = http_ctrl.request;
 
@@ -611,8 +670,15 @@ void WiFi_sendRequest() {
     int datachg_count = count_gps_data_changes(gpsdata);
     // int datachg_count = 1;
 
-    if (print_debug)
+    if (print_debug) {
         Serial.println("start wifi request");
+        Serial.print("Status: ");
+        Serial.print(WiFi.status());
+        Serial.print(", datachg_count: ");
+        Serial.print(datachg_count);
+        Serial.print(", readyState: ");
+        Serial.println(req.readyState());
+    }
 
     if (WiFi.status() == WL_CONNECTED &&
         datachg_count > 0 &&
@@ -631,8 +697,8 @@ void WiFi_sendRequest() {
 
         int j = 0;
         for (int i = 0; i < GPS_CACHE_SIZE; i++) {
-            if (gpsdata[i].age != TinyGPS::GPS_INVALID_AGE &&
-                gpsdata[i].age != 0) {
+            if (gpsdata[i].date != 0 &&
+                gpsdata[i].time != 0) {
 
                 http_json_doc["gpsdata"][j]["data_id"] = 0;
                 http_json_doc["gpsdata"][j]["lat"] = gpsdata[i].lat;
@@ -656,12 +722,18 @@ void WiFi_sendRequest() {
         //     http_json_doc["gpsdata"][j]["servo_angle"] = (j % 180);
         // }
 
-        req.setReqHeader("Content-Type", "application/x-www-form-urlencoded");
+        // req.setReqHeader("Content-Type", "application/x-www-form-urlencoded");
+        req.setReqHeader("Content-Type", "application/json");
 
         String httpRequestData = "";
         serializeJson(http_json_doc, httpRequestData);
-        if (print_debug)
+        if (print_debug) {
+            Serial.print(F("Request json: "));
             Serial.println(httpRequestData);
+        }
+        // const char *testmsg;
+        // testmsg = http_json_doc["pushlight_client_id"];
+        // Serial.println(testmsg);
 
         requestOpenResult = req.open("POST", http_ctrl.PUSHLIGHT_SRV_ENDPOINT);
 
@@ -674,8 +746,10 @@ void WiFi_sendRequest() {
                 200 <= req.responseHTTPcode() < 300) {
                 init_gps_data(gpsdata);
             }
-            if (httpSendSuccess && print_debug)
+            if (httpSendSuccess && print_debug) {
+                Serial.print(F("response http code: "));
                 Serial.println(req.responseHTTPcode());
+            }
         }
     } else {
         if (print_debug)
@@ -685,17 +759,23 @@ void WiFi_sendRequest() {
 
 static void init_gps_data(t_gpsdata data[]) {
     for (int i = 0; i < GPS_CACHE_SIZE; i++) {
-        data[i].lat = TinyGPS::GPS_INVALID_F_ANGLE;
-        data[i].lon = TinyGPS::GPS_INVALID_F_ANGLE;
-        data[i].age = TinyGPS::GPS_INVALID_AGE;
+        data[i].lat = 0; // TinyGPS::GPS_INVALID_F_ANGLE;
+        data[i].lon = 0; // TinyGPS::GPS_INVALID_F_ANGLE;
+        data[i].age = 0;
+        data[i].date = 0;
+        data[i].time = 0;
+        data[i].altitude = 0;   // TinyGPS::GPS_INVALID_F_ALTITUDE;
+        data[i].course = 0;     // TinyGPS::GPS_INVALID_F_ANGLE;
+        data[i].speed_kmph = 0; // TinyGPS::GPS_INVALID_F_SPEED;
+        data[i].servo_angle = 0;
     }
 }
 
 static int count_gps_data_changes(t_gpsdata data[]) {
     int datachg_count = 0;
     for (int i = 0; i < GPS_CACHE_SIZE; i++) {
-        if (data[i].age != 0 &&
-            data[i].age != TinyGPS::GPS_INVALID_AGE) {
+        if (data[i].date != 0 &&
+            data[i].time != 0) {
             datachg_count++;
         }
     }
